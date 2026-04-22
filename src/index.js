@@ -68,8 +68,13 @@ app.get('/api/messages/:email', async (req, res) => {
       return res.status(500).json({ error: 'TESTMAIL_API_KEY is not set in backend .env' });
     }
 
-    // Call Testmail.app JSON API
-    const testmailUrl = `https://api.testmail.app/api/json?apikey=${apikey}&namespace=${namespace}&tag=${tag}`;
+    // Set headers to strictly prevent caching
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    // Call Testmail.app JSON API (livequery=true forces fresh results)
+    const testmailUrl = `https://api.testmail.app/api/json?apikey=${apikey}&namespace=${namespace}&tag=${tag}&livequery=true`;
     
     // Native fetch (requires Node 18+)
     const response = await fetch(testmailUrl);

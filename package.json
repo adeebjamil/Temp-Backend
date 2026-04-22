@@ -1,0 +1,23 @@
+{
+  "name": "temp-mail-backend",
+  "version": "1.0.0",
+  "description": "Backend API for tempinbox.me",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "mailparser": "^3.9.8",
+    "node-cache": "^5.1.2",
+    "nodemailer": "^8.0.5",
+    "smtp-server": "^3.18.4",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

@@ -1,7 +1,10 @@
 {
-  "name": "temp-mail-backend",
+  "name": "wmail-backend",
   "version": "1.0.0",
-  "description": "Backend API for tempinbox.me",
+  "description": "Backend API for tempinbox.me by Adeeb Jamil",
+  "author": "Adeeb Jamil <adeebjamil6459@gmail.com>",
+  "license": "Proprietary",
+  "copyright": "Copyright (c) 2026 Adeeb Jamil. All Rights Reserved.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

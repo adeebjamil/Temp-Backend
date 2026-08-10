@@ -8,12 +8,18 @@
     "dev": "nodemon src/index.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
+    "express-rate-limit": "^8.6.2",
+    "google-auth-library": "^10.9.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
     "mailparser": "^3.9.8",
+    "mongoose": "^8.24.1",
     "node-cache": "^5.1.2",
-    "nodemailer": "^8.0.5",
+    "nodemailer": "^9.0.5",
     "smtp-server": "^3.18.4",
     "socket.io": "^4.8.3"
   },

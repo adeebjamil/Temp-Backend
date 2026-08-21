@@ -19,6 +19,9 @@ const mailRoutes = require('./routes/mailRoutes');
 const app = express();
 const server = http.createServer(app);
 
+// 🛡️ CRITICAL: Trust proxy so rate limiter uses real user IPs (not Render's proxy IP)
+app.set('trust proxy', 1);
+
 // ═══════════════════════════════════════════════════════
 // 🛡️  SECURITY: Whitelisted CORS Origins
 // ═══════════════════════════════════════════════════════
@@ -70,7 +73,7 @@ app.use(helmet({
 // ═══════════════════════════════════════════════════════
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // 300 requests per 15 min per IP
+  max: 1000, // 1000 requests per 15 min per IP (generous for real users)
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests. Please try again later.' },
@@ -78,7 +81,7 @@ const generalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 login attempts per 15 min
+  max: 50, // 50 login attempts per 15 min per IP
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many login attempts. Please try again later.' },
@@ -86,7 +89,7 @@ const authLimiter = rateLimit({
 
 const generateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 emails per minute per IP
+  max: 30, // 30 emails per minute per IP
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Rate limit reached. Please wait before generating more emails.' },

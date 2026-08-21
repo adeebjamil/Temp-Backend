@@ -103,7 +103,7 @@ const generateEmail = async (req, res) => {
       });
     }
 
-    res.json({ success: true, email, ttl: 7200, mongoConnected: isMongoConnected, createdAt: new Date() });
+    res.json({ success: true, email, ttl: 300, mongoConnected: isMongoConnected, createdAt: new Date() });
   } catch (error) {
     console.error('Generate email error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to generate email' });

@@ -9,7 +9,7 @@ const inboxSchema = new mongoose.Schema({
   lockedUntil: { type: Date, default: null },
   lockReason: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },
-  expiresAt: { type: Date, default: () => new Date(Date.now() + 7200 * 1000), expires: 7200 }, // 2 hours TTL
+  expiresAt: { type: Date, default: () => new Date(Date.now() + 300 * 1000), expires: 300 }, // 5 minutes TTL
 });
 
 module.exports = mongoose.models.Inbox || mongoose.model('Inbox', inboxSchema);

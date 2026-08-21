@@ -21,4 +21,17 @@ const connectDB = () => {
 
 const getMongoStatus = () => isMongoConnected;
 
-module.exports = { connectDB, getMongoStatus };
+const getMongoUri = () => {
+  // Mask password in URI for admin display
+  try {
+    const url = new URL(MONGODB_URI);
+    if (url.password) {
+      url.password = '****';
+    }
+    return url.toString();
+  } catch {
+    return MONGODB_URI.replace(/:([^@]+)@/, ':****@');
+  }
+};
+
+module.exports = { connectDB, getMongoStatus, getMongoUri };

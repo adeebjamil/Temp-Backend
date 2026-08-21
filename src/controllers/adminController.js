@@ -4,7 +4,7 @@ const AuditLogModel = require('../models/AuditLog');
 const BlocklistModel = require('../models/Blocklist');
 
 const state = require('../config/state');
-const { getMongoStatus } = require('../config/db');
+const { getMongoStatus, getMongoUri } = require('../config/db');
 const { loadBlocklist } = require('../middlewares/security');
 
 const getStats = async (req, res) => {
@@ -20,6 +20,7 @@ const getStats = async (req, res) => {
     res.json({
       success: true,
       mongoConnected: isMongoConnected,
+      mongoUri: getMongoUri(),
       activeInboxes: mongoInboxesCount,
       activeWebsockets: state.getActiveWebsockets ? state.getActiveWebsockets() : 0,
       memoryUsageMB: (memory.heapUsed / 1024 / 1024).toFixed(1),

@@ -5,6 +5,9 @@ const inboxSchema = new mongoose.Schema({
   userEmail: String,
   messagesCount: { type: Number, default: 0 },
   clientIp: String,
+  status: { type: String, enum: ['ACTIVE', 'LOCKED'], default: 'ACTIVE' },
+  lockedUntil: { type: Date, default: null },
+  lockReason: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, default: () => new Date(Date.now() + 7200 * 1000), expires: 7200 }, // 2 hours TTL
 });

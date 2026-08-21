@@ -5,6 +5,10 @@ const {
   getStats,
   getInboxes,
   purgeInbox,
+  bulkPurge,
+  getLockedInboxes,
+  unlockInbox,
+  triggerMaintenance,
   getSocketLogs,
   getJwtAudit,
   getUsers,
@@ -19,6 +23,10 @@ router.use(verifyAdmin); // Protect all routes below
 router.get('/stats', getStats);
 router.get('/inboxes', getInboxes);
 router.post('/purge-inbox', purgeInbox);
+router.post('/bulk-purge', bulkPurge);
+router.get('/locked-inboxes', getLockedInboxes);
+router.put('/unlock-inbox', unlockInbox);
+router.post('/trigger-maintenance', triggerMaintenance);
 router.get('/socket-logs', getSocketLogs);
 router.get('/jwt-audit', getJwtAudit);
 router.get('/users', getUsers);

@@ -7,9 +7,10 @@ const http = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 
-const { connectDB } = require('./config/db');
+const { connectDB, getMongoStatus } = require('./config/db');
 const state = require('./config/state');
 const { checkBlocklist } = require('./middlewares/security');
+const InboxModel = require('./models/Inbox');
 
 // Import Routes
 const authRoutes = require('./routes/authRoutes');
@@ -199,4 +200,44 @@ app.use((err, req, res, next) => {
 const API_PORT = process.env.PORT || 5000;
 server.listen(API_PORT, () => {
   console.log(`🚀 W-Mail Backend running on port ${API_PORT} [SECURED]`);
+
+  // ═══════════════════════════════════════════════════════
+  // 🔧 AUTO MAINTENANCE: Every 24 hours, run 2-min cleanup
+  // ═══════════════════════════════════════════════════════
+  const MAINTENANCE_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+  const MAINTENANCE_DURATION = 2 * 60 * 1000; // 2 minutes
+
+  setInterval(async () => {
+    console.log('🔧 AUTO MAINTENANCE: Starting scheduled cleanup...');
+    state.isMaintenanceMode = true;
+    io.emit('maintenance_start', { message: 'System maintenance in progress. Back in 2 minutes.' });
+
+    try {
+      // Clear all caches
+      state.mailCache.flushAll();
+      state.activeInboxesStore.clear();
+      state.abuseTracker.clear();
+
+      // Clear temporary MongoDB inbox data (keep locked for audit)
+      if (getMongoStatus()) {
+        await InboxModel.deleteMany({ status: { $ne: 'LOCKED' } });
+      }
+
+      console.log('🔧 AUTO MAINTENANCE: Cache & storage cleared.');
+    } catch (err) {
+      console.error('🔧 AUTO MAINTENANCE ERROR:', err.message);
+    }
+
+    // Auto-end after 2 minutes
+    setTimeout(() => {
+      state.isMaintenanceMode = false;
+      io.emit('maintenance_end', { message: 'Maintenance complete. System is back online.' });
+      console.log('✅ AUTO MAINTENANCE: Complete. System back online.');
+    }, MAINTENANCE_DURATION);
+  }, MAINTENANCE_INTERVAL);
+});
+
+// 🔧 Public endpoint: Frontend polls this to show maintenance banner
+app.get('/api/maintenance-status', (req, res) => {
+  res.json({ isMaintenanceMode: state.isMaintenanceMode });
 });

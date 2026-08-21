@@ -8,8 +8,53 @@ const { getMongoStatus } = require('../config/db');
 const VALID_TESTMAIL_REGEX = /^[a-z0-9]+\.[a-z0-9]+@inbox\.testmail\.app$/i;
 const SAFE_STRING_REGEX = /^[a-zA-Z0-9.@_-]+$/;
 
+// 🛡️ Abuse Detection Config
+const ABUSE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_GENERATES_PER_WINDOW = 50;
+const MAX_MESSAGES_PER_WINDOW = 200;
+const LOCK_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+const getClientIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || '127.0.0.1';
+
+const trackAbuse = (ip, type) => {
+  const now = Date.now();
+  let record = state.abuseTracker.get(ip);
+
+  if (!record || (now - record.windowStart) > ABUSE_WINDOW_MS) {
+    record = { generateCount: 0, messageCount: 0, windowStart: now };
+  }
+
+  if (type === 'generate') record.generateCount++;
+  if (type === 'message') record.messageCount++;
+
+  state.abuseTracker.set(ip, record);
+
+  if (record.generateCount > MAX_GENERATES_PER_WINDOW) return 'SPAM_GENERATE';
+  if (record.messageCount > MAX_MESSAGES_PER_WINDOW) return 'SPAM_MESSAGES';
+  return null;
+};
+
+const lockInbox = async (email, ip, reason) => {
+  const lockedUntil = new Date(Date.now() + LOCK_DURATION_MS);
+  if (getMongoStatus()) {
+    await InboxModel.updateOne({ email }, {
+      status: 'LOCKED',
+      lockedUntil,
+      lockReason: reason,
+    });
+  }
+  // Log the abuse event
+  state.socketLogsStore.unshift({
+    id: 'SYSTEM',
+    event: 'ABUSE_DETECTED',
+    payload: `Locked ${email.substring(0, 20)}... | IP: ${ip} | Reason: ${reason}`,
+    time: new Date().toLocaleTimeString(),
+    status: 'LOCKED',
+  });
+  if (state.socketLogsStore.length > 50) state.socketLogsStore.pop();
+};
+
 const generateRandomString = (length) => {
-  // 🛡️ Use crypto-safe random instead of Math.random
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
   const randomValues = new Uint32Array(length);
@@ -23,9 +68,17 @@ const generateRandomString = (length) => {
 const generateEmail = async (req, res) => {
   try {
     const isMongoConnected = getMongoStatus();
+    const clientIp = getClientIp(req);
 
-    // 🛡️ No daily limits — user requested unlimited generation
-    // Rate limiting is handled at the Express middleware level
+    // 🛡️ Abuse Detection
+    const abuseType = trackAbuse(clientIp, 'generate');
+    if (abuseType) {
+      return res.status(429).json({
+        success: false,
+        error: 'ABUSE_DETECTED',
+        message: 'Suspicious activity detected. Your access has been temporarily restricted.',
+      });
+    }
 
     const namespace = process.env.TESTMAIL_NAMESPACE || '3xeds';
     const randomStr = generateRandomString(8);
@@ -37,15 +90,16 @@ const generateEmail = async (req, res) => {
       email,
       createdAt: new Date().toISOString(),
       messagesCount: 0,
-      clientIp: req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '127.0.0.1',
+      clientIp,
     };
     state.activeInboxesStore.set(email, inboxData);
 
     if (isMongoConnected) {
       await InboxModel.create({
         email,
-        clientIp: inboxData.clientIp,
+        clientIp,
         messagesCount: 0,
+        status: 'ACTIVE',
       });
     }
 
@@ -59,13 +113,13 @@ const generateEmail = async (req, res) => {
 const getMessages = async (req, res) => {
   try {
     const email = req.params.email;
+    const clientIp = getClientIp(req);
 
     // 🛡️ SECURITY: Input validation
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ success: false, error: 'Email parameter required' });
     }
 
-    // 🛡️ SECURITY: Strict format validation
     if (!SAFE_STRING_REGEX.test(email)) {
       return res.status(400).json({ success: false, error: 'Invalid characters in email' });
     }
@@ -74,12 +128,39 @@ const getMessages = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid email format' });
     }
 
-    // 🛡️ SECURITY: Max length check
     if (email.length > 100) {
       return res.status(400).json({ success: false, error: 'Email too long' });
     }
 
+    // 🛡️ Abuse Detection
+    const abuseType = trackAbuse(clientIp, 'message');
+    if (abuseType) {
+      await lockInbox(email, clientIp, abuseType);
+      return res.status(429).json({
+        success: false,
+        error: 'INBOX_LOCKED',
+        message: 'Your inbox has been locked for 24 hours due to suspicious activity.',
+      });
+    }
+
+    // 🛡️ Check if inbox is locked
     const isMongoConnected = getMongoStatus();
+    if (isMongoConnected) {
+      const inboxDoc = await InboxModel.findOne({ email });
+      if (inboxDoc && inboxDoc.status === 'LOCKED') {
+        if (inboxDoc.lockedUntil && new Date() < inboxDoc.lockedUntil) {
+          return res.status(403).json({
+            success: false,
+            error: 'INBOX_LOCKED',
+            message: `Inbox locked until ${inboxDoc.lockedUntil.toISOString()}. Contact admin.`,
+          });
+        } else {
+          // Lock expired, auto-unlock
+          await InboxModel.updateOne({ email }, { status: 'ACTIVE', lockedUntil: null, lockReason: null });
+        }
+      }
+    }
+
     const exists = state.mailCache.has(`account:${email}`);
     if (!exists && !isMongoConnected) {
       return res.status(404).json({ success: false, error: 'Inbox not found or expired' });
@@ -103,7 +184,7 @@ const getMessages = async (req, res) => {
 
     const testmailUrl = `https://api.testmail.app/api/json?apikey=${encodeURIComponent(apikey)}&namespace=${encodeURIComponent(namespace)}&tag=${encodeURIComponent(tag)}&livequery=true`;
     const response = await fetch(testmailUrl, {
-      timeout: 15000, // 15 second timeout
+      timeout: 15000,
     });
 
     if (!response.ok) {
@@ -145,7 +226,6 @@ const deleteEmail = async (req, res) => {
   try {
     const email = req.params.email;
 
-    // 🛡️ SECURITY: Input validation
     if (!email || !SAFE_STRING_REGEX.test(email) || !VALID_TESTMAIL_REGEX.test(email)) {
       return res.status(400).json({ success: false, error: 'Invalid email format' });
     }

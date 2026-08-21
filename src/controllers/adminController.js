@@ -11,10 +11,12 @@ const getStats = async (req, res) => {
   try {
     const memory = process.memoryUsage();
     let mongoInboxesCount = state.activeInboxesStore.size;
+    let lockedInboxCount = 0;
     const isMongoConnected = getMongoStatus();
 
     if (isMongoConnected) {
       mongoInboxesCount = await InboxModel.countDocuments();
+      lockedInboxCount = await InboxModel.countDocuments({ status: 'LOCKED', lockedUntil: { $gt: new Date() } });
     }
 
     res.json({
@@ -22,6 +24,8 @@ const getStats = async (req, res) => {
       mongoConnected: isMongoConnected,
       mongoUri: getMongoUri(),
       activeInboxes: mongoInboxesCount,
+      lockedInboxCount,
+      isMaintenanceMode: state.isMaintenanceMode,
       activeWebsockets: state.getActiveWebsockets ? state.getActiveWebsockets() : 0,
       memoryUsageMB: (memory.heapUsed / 1024 / 1024).toFixed(1),
       cpuUsagePercent: (Math.random() * 15 + 10).toFixed(1),
@@ -38,12 +42,13 @@ const getInboxes = async (req, res) => {
     const isMongoConnected = getMongoStatus();
     let inboxes = Array.from(state.activeInboxesStore.values());
     if (isMongoConnected) {
-      const dbInboxes = await InboxModel.find().sort({ createdAt: -1 }).limit(100);
+      const dbInboxes = await InboxModel.find({ status: { $ne: 'LOCKED' } }).sort({ createdAt: -1 }).limit(100);
       inboxes = dbInboxes.map((i) => ({
         email: i.email,
         createdAt: i.createdAt,
         messagesCount: i.messagesCount,
         clientIp: i.clientIp,
+        status: i.status || 'ACTIVE',
       }));
     }
     res.json({ success: true, mongoConnected: isMongoConnected, count: inboxes.length, inboxes });
@@ -67,6 +72,117 @@ const purgeInbox = async (req, res) => {
     res.json({ success: true, message: `Inbox ${email} purged successfully.` });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Purge failed' });
+  }
+};
+
+// 🛡️ NEW: Bulk purge multiple inboxes at once
+const bulkPurge = async (req, res) => {
+  try {
+    const { emails } = req.body;
+    if (!emails || !Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({ success: false, error: 'Array of emails required' });
+    }
+
+    let deletedCount = 0;
+    for (const email of emails) {
+      state.mailCache.del(`account:${email}`);
+      state.activeInboxesStore.delete(email);
+      deletedCount++;
+    }
+
+    if (getMongoStatus()) {
+      await InboxModel.deleteMany({ email: { $in: emails } });
+    }
+
+    res.json({ success: true, message: `${deletedCount} inboxes purged successfully.` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Bulk purge failed' });
+  }
+};
+
+// 🛡️ NEW: Get all locked inboxes
+const getLockedInboxes = async (req, res) => {
+  try {
+    if (!getMongoStatus()) {
+      return res.json({ success: true, lockedInboxes: [] });
+    }
+
+    const locked = await InboxModel.find({
+      status: 'LOCKED',
+      lockedUntil: { $gt: new Date() },
+    }).sort({ lockedUntil: -1 }).limit(100);
+
+    const lockedInboxes = locked.map((i) => ({
+      email: i.email,
+      clientIp: i.clientIp,
+      lockReason: i.lockReason,
+      lockedUntil: i.lockedUntil,
+      createdAt: i.createdAt,
+    }));
+
+    res.json({ success: true, count: lockedInboxes.length, lockedInboxes });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to fetch locked inboxes' });
+  }
+};
+
+// 🛡️ NEW: Unlock a locked inbox (admin only)
+const unlockInbox = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email required' });
+
+    if (getMongoStatus()) {
+      await InboxModel.updateOne({ email }, {
+        status: 'ACTIVE',
+        lockedUntil: null,
+        lockReason: null,
+      });
+    }
+
+    res.json({ success: true, message: `Inbox ${email} unlocked.` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Unlock failed' });
+  }
+};
+
+// 🛡️ NEW: Trigger maintenance mode manually
+const triggerMaintenance = async (req, res) => {
+  try {
+    if (state.isMaintenanceMode) {
+      return res.status(400).json({ success: false, error: 'Maintenance already in progress' });
+    }
+
+    state.isMaintenanceMode = true;
+
+    // Broadcast to all connected clients
+    if (req.io) {
+      req.io.emit('maintenance_start', { message: 'System maintenance in progress. Back in 2 minutes.' });
+    }
+
+    // Clear all caches
+    state.mailCache.flushAll();
+    state.activeInboxesStore.clear();
+    state.abuseTracker.clear();
+
+    // Clear temporary MongoDB data (inboxes only, not users/audit)
+    if (getMongoStatus()) {
+      await InboxModel.deleteMany({ status: { $ne: 'LOCKED' } }); // Keep locked ones for audit
+    }
+
+    // Auto end maintenance after 2 minutes
+    setTimeout(() => {
+      state.isMaintenanceMode = false;
+      if (req.io) {
+        req.io.emit('maintenance_end', { message: 'Maintenance complete. System is back online.' });
+      }
+      console.log('✅ Maintenance mode ended. System is back online.');
+    }, 2 * 60 * 1000);
+
+    res.json({ success: true, message: 'Maintenance mode started. Will auto-end in 2 minutes.' });
+  } catch (error) {
+    state.isMaintenanceMode = false;
+    res.status(500).json({ success: false, error: 'Failed to start maintenance' });
   }
 };
 
@@ -109,7 +225,6 @@ const updateUserStatus = async (req, res) => {
       await UserModel.findOneAndUpdate({ email }, { status });
     }
     
-    // Broadcast status change to the specific user room
     if (req.io) {
       req.io.to(email).emit('account_status_changed', { email, status });
     }
@@ -163,12 +278,14 @@ const removeBlocklist = async (req, res) => {
   }
 };
 
-
-
 module.exports = {
   getStats,
   getInboxes,
   purgeInbox,
+  bulkPurge,
+  getLockedInboxes,
+  unlockInbox,
+  triggerMaintenance,
   getSocketLogs,
   getJwtAudit,
   getUsers,

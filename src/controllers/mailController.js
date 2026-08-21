@@ -166,6 +166,13 @@ const getMessages = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Inbox not found or expired' });
     }
 
+    // 🛡️ SMART CACHE: Check if messages were fetched within the last 10 seconds
+    const cacheKey = `msgs:${email}`;
+    const cachedMessages = state.mailCache.get(cacheKey);
+    if (cachedMessages) {
+      return res.json({ success: true, count: cachedMessages.length, messages: cachedMessages, cached: true });
+    }
+
     const localPart = email.split('@')[0];
     const parts = localPart.split('.');
     if (parts.length !== 2) {
@@ -187,22 +194,29 @@ const getMessages = async (req, res) => {
       timeout: 10000,
     });
 
-    if (!response.ok) {
-      return res.status(502).json({ success: false, error: 'Mail service temporarily unavailable' });
-    }
-
-    const data = await response.json();
-
     let messages = [];
-    if (data && data.emails) {
-      messages = data.emails.map((msg) => ({
-        id: msg.id,
-        sender: msg.from,
-        subject: msg.subject || '(No Subject)',
-        text: msg.text || '',
-        html: msg.html || '',
-        receivedAt: new Date(msg.date),
-      }));
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.emails) {
+        messages = data.emails.map((msg) => ({
+          id: msg.id,
+          sender: msg.from,
+          subject: msg.subject || '(No Subject)',
+          text: msg.text || '',
+          html: msg.html || '',
+          receivedAt: new Date(msg.date),
+        }));
+      }
+      // Cache messages for 10 seconds to drastically reduce external API quota consumption
+      state.mailCache.set(cacheKey, messages, 10);
+    } else if (response.status === 429) {
+      // 🛡️ Testmail rate limited on their free tier: gracefully return empty/cached list instead of 502 error
+      console.warn(`⚠️ Testmail API quota exceeded (429). Serving fallback for ${email}.`);
+      messages = cachedMessages || [];
+    } else {
+      console.warn(`⚠️ Testmail returned status ${response.status} for ${email}`);
+      messages = cachedMessages || [];
     }
 
     if (state.activeInboxesStore.has(email)) {

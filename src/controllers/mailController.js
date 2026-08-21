@@ -182,9 +182,9 @@ const getMessages = async (req, res) => {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    const testmailUrl = `https://api.testmail.app/api/json?apikey=${encodeURIComponent(apikey)}&namespace=${encodeURIComponent(namespace)}&tag=${encodeURIComponent(tag)}&livequery=true`;
+    const testmailUrl = `https://api.testmail.app/api/json?apikey=${encodeURIComponent(apikey)}&namespace=${encodeURIComponent(namespace)}&tag=${encodeURIComponent(tag)}`;
     const response = await fetch(testmailUrl, {
-      timeout: 15000,
+      timeout: 10000,
     });
 
     if (!response.ok) {

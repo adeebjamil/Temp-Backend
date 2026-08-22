@@ -59,14 +59,18 @@ const verifyUser = async (req, res, next) => {
 
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Check User Ban/Deactivation status
-    const user = await UserModel.findOne({ email: decoded.email });
-    if (user) {
-      if (user.status === 'BANNED') {
-        return res.status(403).json({ success: false, error: 'ACCOUNT_BANNED', message: 'Your account has been suspended.' });
-      }
-      if (user.status === 'DEACTIVATED') {
-        return res.status(403).json({ success: false, error: 'ACCOUNT_DEACTIVATED', message: 'Your account has been deactivated.' });
+    // Check User Ban/Deactivation status with case-insensitive query
+    if (decoded?.email) {
+      const user = await UserModel.findOne({
+        email: { $regex: new RegExp(`^${decoded.email.trim()}$`, 'i') }
+      });
+      if (user) {
+        if (user.status === 'BANNED') {
+          return res.status(403).json({ success: false, error: 'ACCOUNT_BANNED', message: 'Your account has been suspended by administrator.' });
+        }
+        if (user.status === 'DEACTIVATED') {
+          return res.status(403).json({ success: false, error: 'ACCOUNT_DEACTIVATED', message: 'Your account has been deactivated by administrator.' });
+        }
       }
     }
 

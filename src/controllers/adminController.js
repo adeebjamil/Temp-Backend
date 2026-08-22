@@ -221,17 +221,42 @@ const updateUserStatus = async (req, res) => {
     const { email, status } = req.body;
     if (!email || !status) return res.status(400).json({ success: false, error: 'Email and status required' });
     
-    if (getMongoStatus()) {
-      await UserModel.findOneAndUpdate({ email }, { status });
-    }
-    
-    if (req.io) {
-      req.io.to(email).emit('account_status_changed', { email, status });
+    const validStatuses = ['ACTIVE', 'DEACTIVATED', 'BANNED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: `Invalid status. Allowed: ${validStatuses.join(', ')}` });
     }
 
-    res.json({ success: true, message: `User ${email} status updated to ${status}` });
+    const cleanEmail = email.trim();
+    const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+    
+    // Safety check: Prevent modifying the SUPERADMIN status
+    if (cleanEmail.toLowerCase() === adminEmail) {
+      return res.status(403).json({ success: false, error: 'Cannot deactivate or ban the superadmin account' });
+    }
+    
+    let updatedUser = null;
+    if (getMongoStatus()) {
+      updatedUser = await UserModel.findOneAndUpdate(
+        { email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } },
+        { status },
+        { new: true }
+      );
+    }
+    
+    // Broadcast live disconnect & status event to user's active sockets
+    if (req.io) {
+      req.io.to(cleanEmail.toLowerCase()).emit('account_status_changed', { email: cleanEmail, status });
+      req.io.to(cleanEmail).emit('account_status_changed', { email: cleanEmail, status });
+    }
+
+    res.json({
+      success: true,
+      message: `User ${cleanEmail} status successfully changed to ${status}`,
+      user: updatedUser,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update status' });
+    console.error('Update user status error:', error);
+    res.status(500).json({ success: false, error: 'Failed to update user status' });
   }
 };
 

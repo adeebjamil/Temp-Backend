@@ -138,37 +138,38 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join_inbox', (data) => {
-    // 🛡️ Validate: data can be a string (email) or { email, token }
-    let email = data;
-    let token = null;
+    let email = typeof data === 'object' && data !== null ? data.email : data;
 
-    if (typeof data === 'object' && data !== null) {
-      email = data.email;
-      token = data.token;
-    }
-
-    // Validate email format
     if (!email || typeof email !== 'string' || !email.includes('@')) {
-      socket.emit('error_msg', { error: 'Invalid email format' });
       return;
     }
 
-    // Sanitize: only allow testmail.app addresses
-    if (!email.endsWith('@inbox.testmail.app')) {
-      socket.emit('error_msg', { error: 'Invalid mailbox address' });
-      return;
-    }
-
-    // Leave all previous rooms
-    Array.from(socket.rooms).forEach((room) => {
-      if (room !== socket.id) socket.leave(room);
-    });
-    socket.join(email);
+    const cleanEmail = email.trim();
+    socket.join(cleanEmail);
+    socket.join(cleanEmail.toLowerCase());
 
     state.socketLogsStore.unshift({
       id: socket.id.substring(0, 10),
       event: 'join_inbox',
-      payload: `Joined room: ${email.substring(0, 15)}...`,
+      payload: `Joined room: ${cleanEmail}`,
+      time: new Date().toLocaleTimeString(),
+      status: 'SUCCESS',
+    });
+    if (state.socketLogsStore.length > 50) state.socketLogsStore.pop();
+  });
+
+  socket.on('join_user', (data) => {
+    let email = typeof data === 'object' && data !== null ? data.email : data;
+    if (!email || typeof email !== 'string' || !email.includes('@')) return;
+
+    const cleanEmail = email.trim();
+    socket.join(cleanEmail);
+    socket.join(cleanEmail.toLowerCase());
+
+    state.socketLogsStore.unshift({
+      id: socket.id.substring(0, 10),
+      event: 'join_user',
+      payload: `User joined: ${cleanEmail}`,
       time: new Date().toLocaleTimeString(),
       status: 'SUCCESS',
     });

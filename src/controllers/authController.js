@@ -42,11 +42,17 @@ const googleLogin = async (req, res) => {
 
     if (isMongoConnected) {
       const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.connection?.remoteAddress || '127.0.0.1';
-      const existingUser = await UserModel.findOne({ email });
+      const cleanEmail = email.trim();
+      const existingUser = await UserModel.findOne({
+        email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') }
+      });
       
       if (existingUser) {
-        if (existingUser.status === 'DEACTIVATED' || existingUser.status === 'BANNED') {
-          return res.status(403).json({ success: false, error: `Account is ${existingUser.status.toLowerCase()}` });
+        if (existingUser.status === 'BANNED') {
+          return res.status(403).json({ success: false, error: 'Your account has been suspended by administrator.' });
+        }
+        if (existingUser.status === 'DEACTIVATED') {
+          return res.status(403).json({ success: false, error: 'Your account has been deactivated. Contact support to reactivate.' });
         }
         if (existingUser.lastIp && existingUser.lastIp !== clientIp) {
           multiDeviceDetected = true;
@@ -54,8 +60,8 @@ const googleLogin = async (req, res) => {
       }
 
       dbUser = await UserModel.findOneAndUpdate(
-        { email },
-        { email, name, photoURL, role, lastLogin: new Date(), lastIp: clientIp },
+        { email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } },
+        { email: cleanEmail, name, photoURL, role, lastLogin: new Date(), lastIp: clientIp },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
